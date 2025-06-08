@@ -25,7 +25,6 @@
 /// ````
 use std::env;
 use std::ffi::OsStr;
-use std::fmt::Write as _;
 use std::fs::read_dir;
 use std::path::{Path, PathBuf};
 
@@ -75,26 +74,36 @@ pub(crate) fn get_manifest() -> Result<PathBuf, Error> {
     }
 }
 
+// padding of the final formatting of the table
+const MIN_PADDING: usize = 6;
+
 /// gather the sizes of subdirs of the `target` directory and prints a formatted table
 /// of the data to stdout
 pub(crate) fn local_subcmd() -> Result<(), Error> {
-    // padding of the final formatting of the table
-    const MIN_PADDING: usize = 6;
-
     // find the closest manifest, traverse up if necessary
     let manifest = get_manifest()?;
 
     // get the cargo metadata for the manifest
+    // We attempt to call cargo metadata with -Zbuild-dir to get the build-dir and fallback to
+    // calling without if we fail (most likely due to not using a nightly toolchain)
+    // Once Cargo build-dir is stablized we can simplify this. See https://github.com/rust-lang/cargo/issues/14125
     let metadata = MetadataCommand::new()
         .manifest_path(&manifest)
         .no_deps()
+        .other_options(["-Zbuild-dir"].map(str::to_string))
         .exec()
-        .unwrap_or_else(|error| {
-            panic!(
-                "Failed to parse manifest: '{}'\nError: '{:?}'",
-                &manifest.display(),
-                error
-            )
+        .unwrap_or_else(|_| {
+            MetadataCommand::new()
+                .manifest_path(&manifest)
+                .no_deps()
+                .exec()
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "Failed to parse manifest: '{}'\nError: '{:?}'",
+                        &manifest.display(),
+                        error
+                    )
+                })
         });
 
     // get the project target dir from the metadata
@@ -107,28 +116,36 @@ pub(crate) fn local_subcmd() -> Result<(), Error> {
 
     // println!("Found target dir: '{}'", target_dir.display());
 
-    // get the size
-    let dirinfo = library::cumulative_dir_size(&target_dir);
-    // and the human readable size
-    let size_hr = dirinfo.dir_size.format_size(DECIMAL);
-
-    let mut stdout = String::new();
-
-    let mut lines = Vec::new();
-
-    writeln!(stdout, "Project {:?}", metadata.workspace_root.to_string()).unwrap();
+    println!("Project {:?}", metadata.workspace_root.to_string());
 
     // If there is no target dir, we can quit
     if !target_dir.exists() {
-        stdout.push_str("No target dir found!");
-        eprintln!("{stdout}");
+        println!("No target dir found!");
     }
 
-    writeln!(stdout, "Target dir: {}\n", target_dir.display()).unwrap();
-    lines.push(TableLine::new(0, &"Total Size: ", &size_hr));
+    println!("\nTarget dir: {}", target_dir.display());
+    add_dir_breakdown(&target_dir);
+
+    if let Some(build_dir) = metadata.build_directory {
+        if build_dir != target_dir {
+            println!("Build dir: {}", build_dir);
+            add_dir_breakdown(&PathBuf::from(build_dir));
+        }
+    }
+
+    Ok(())
+}
+
+fn add_dir_breakdown(dir: &PathBuf) {
+    let mut lines = Vec::new();
+
+    let dirinfo = library::cumulative_dir_size(&dir);
+    // and the human readable size
+    let size_hr = dirinfo.dir_size.format_size(DECIMAL);
+    lines.push(TableLine::new(0, &"    Total Size: ", &size_hr));
 
     // we are going to check these directories:
-    let p = &target_dir; // path
+    let p = &dir; // path
     let target_dir_debug = p.join("debug");
     let target_dir_rls = p.join("rls");
     let target_dir_release = p.join("release");
@@ -140,7 +157,7 @@ pub(crate) fn local_subcmd() -> Result<(), Error> {
     if size_debug > 0 {
         lines.push(TableLine::new(
             0,
-            &"debug: ".to_string(),
+            &"    debug: ".to_string(),
             &size_debug.format_size(DECIMAL),
         ));
     }
@@ -149,7 +166,7 @@ pub(crate) fn local_subcmd() -> Result<(), Error> {
     if size_rls > 0 {
         lines.push(TableLine::new(
             0,
-            &"rls: ".to_string(),
+            &"    rls: ".to_string(),
             &size_rls.format_size(DECIMAL),
         ));
     }
@@ -158,7 +175,7 @@ pub(crate) fn local_subcmd() -> Result<(), Error> {
     if size_release > 0 {
         lines.push(TableLine::new(
             0,
-            &"release: ".to_string(),
+            &"    release: ".to_string(),
             &size_release.format_size(DECIMAL),
         ));
     }
@@ -167,7 +184,7 @@ pub(crate) fn local_subcmd() -> Result<(), Error> {
     if size_package > 0 {
         lines.push(TableLine::new(
             0,
-            &"package: ".to_string(),
+            &"    package: ".to_string(),
             &size_package.format_size(DECIMAL),
         ));
     }
@@ -176,7 +193,7 @@ pub(crate) fn local_subcmd() -> Result<(), Error> {
     if size_doc > 0 {
         lines.push(TableLine::new(
             0,
-            &"doc: ".to_string(),
+            &"    doc: ".to_string(),
             &size_doc.format_size(DECIMAL),
         ));
     }
@@ -186,7 +203,7 @@ pub(crate) fn local_subcmd() -> Result<(), Error> {
     // Get the immediate subdirs of the target/ dir, skip the known ones (rls, package, debug, release)
     // and look how big the remaining stuff is
     #[allow(clippy::manual_filter_map)] // meh
-    let size_other: u64 = read_dir(&target_dir)
+    let size_other: u64 = read_dir(&dir)
         .unwrap()
         .filter_map(Result::ok)
         .map(|x| x.path())
@@ -216,14 +233,12 @@ pub(crate) fn local_subcmd() -> Result<(), Error> {
     if size_other > 0 {
         lines.push(TableLine::new(
             0,
-            &"other: ".to_string(),
+            &"    other: ".to_string(),
             &size_other.format_size(DECIMAL),
         ));
     }
 
     // add the formatted table to the output
-    stdout.push_str(&two_row_table(MIN_PADDING, lines, true));
-    // and finally print it
-    println!("{stdout}");
-    Ok(())
+    let output = two_row_table(MIN_PADDING, lines, true);
+    println!("{output}");
 }

@@ -324,9 +324,11 @@ pub(crate) fn gen_clap() -> ArgMatches {
 
     //<local>
     // local subcommand
-    let local = App::new("local").about("check local build cache (target) of a rust project");
+    let local =
+        App::new("local").about("check local build cache (target-dir,build-dir) of a rust project");
     // shorter local subcommand (l)
-    let local_short = App::new("l").about("check local build cache (target) of a rust project");
+    let local_short =
+        App::new("l").about("check local build cache (target-dir,build-dir) of a rust project");
     //</local>
 
     // <registry>
@@ -543,8 +545,8 @@ OPTIONS:
 SUBCOMMANDS:
     clean-unref    remove crates that are not referenced in a Cargo.toml from the cache
     help           Print this message or the help of the given subcommand(s)
-    l              check local build cache (target) of a rust project
-    local          check local build cache (target) of a rust project
+    l              check local build cache (target-dir,build-dir) of a rust project
+    local          check local build cache (target-dir,build-dir) of a rust project
     q              run a query
     query          run a query
     r              query each package registry separately
@@ -619,8 +621,8 @@ OPTIONS:
 SUBCOMMANDS:
     clean-unref    remove crates that are not referenced in a Cargo.toml from the cache
     help           Print this message or the help of the given subcommand(s)
-    l              check local build cache (target) of a rust project
-    local          check local build cache (target) of a rust project
+    l              check local build cache (target-dir,build-dir) of a rust project
+    local          check local build cache (target-dir,build-dir) of a rust project
     q              run a query
     query          run a query
     r              query each package registry separately
